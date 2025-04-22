@@ -7,6 +7,7 @@ This repository contains the code, outputs, and presentation materials for resub
 
   Note: The section of code that was updated is labeled in the notebook. Updates include optimization of parameters for Random Forest
   and Boosting methods used for the Regression model.
+- Homework1_MarkDaza_Updated.html: An HTML version of the notebook allows the grader to visualize the code without the need to run it.
 - 202500423_YouthData_Updated.pdf: Final presentation slide deck. Slides that were modified say (Updated) as part of the slide title.
 
   Note: Slides now include a theoretical background slide. Variables in the plots used were renamed to be plain language to ease
