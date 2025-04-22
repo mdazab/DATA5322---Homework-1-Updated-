@@ -4,10 +4,12 @@ This repository contains the code, outputs, and presentation materials for the r
 
 ## Contents
 - Homework1_MarkDaza_Updated.Rmd: Updated code and model implementation and optimization using tree, bagging, random forest, and boosting.
-  \nNote: Section of code that was updated is labeled in the notebook. Updates include optimization of parameters for Random Forest
+
+  Note: Section of code that was updated is labeled in the notebook. Updates include optimization of parameters for Random Forest
   and Boosting methods used for Regression model.
 - 202500423_YouthData_Updated.pdf (Updated: Final presentation slide deck. Slides that were modified say (Updated) as part of the slide title.
-  \nNote: Slides now include a theoretical background slide. Variables in the plots used were renamed to be plain lenguate to ease
+
+  Note: Slides now include a theoretical background slide. Variables in the plots used were renamed to be plain lenguate to ease
   understanding. Model result number were updated in all slides. Additionally, wording on slides was updated for consistency throughout
   presentation. 
 - https://www.youtube.com/watch?v=-WNgY6EFwxc&ab_channel=Mark - Link to Presentation Video (NOT Updated)
