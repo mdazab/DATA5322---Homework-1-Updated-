@@ -1,0 +1,968 @@
+---
+title: 'Practical Homework 1: Decision Trees'
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(randomForest)
+library(tree)
+library(gbm)
+#Load youth data that has been preliminary cleaned
+load('youth_data.Rdata')
+
+#Display data to evaluate df contents
+summary(df)
+```
+
+```{r}
+#Strategy previously used to ensure that data included responses from youth (ages 12-18) will be applied to the columns containing youth experience responses.
+df_clean <- df %>%  drop_na(SCHFELT, TCHGJOB, AVGGRADE, STNDSCIG, STNDSMJ, STNDALC, STNDDNK, PARCHKHW, 
+                            PARHLPHW, PRCHORE2, PRLMTTV2, PARLMTSN, PRGDJOB2, PRPROUD2, ARGUPAR,
+                            YOFIGHT2, YOGRPFT2, YOHGUN2, YOSELL2, YOSTOLE2, YOATTAK2, PRPKCIG2, PRMJEVR2,
+                            PRMJMO, PRALDLY2, YFLPKCG2, YFLTMRJ2, YFLMJMO, YFLADLY2, FRDPCIG2,
+                            FRDMEVR2, FRDMJMON, FRDADLY2, TALKPROB, PRTALK3, PRBSOLV2, PREVIOL2,
+                            PRVDRGO2, GRPCNSL2, PREGPGM2, YTHACT2, DRPRVME3, ANYEDUC3, RLGATTD,
+                            RLGIMPT, RLGDCSN, RLGFRND)
+```
+```{r}
+# Observations coded as 91 or 991 in frequency-of-use variables, denoting ‘NEVER USED,’ may be recoded to 0, as all indicate an absence of use and are analytically equivalent.
+df_clean <- df_clean %>%
+  mutate(
+    IRALCFY = ifelse(IRALCFY %in% c(991, 993), 0, IRALCFY),
+    IRMJFY = ifelse(IRMJFY %in% c(991, 993), 0, IRMJFY),
+    IRCIGFM = ifelse(IRCIGFM %in% c(91, 93), 0, IRCIGFM),
+    IRSMKLSS30N = ifelse(IRSMKLSS30N %in% c(91, 93), 0, IRSMKLSS30N),
+    IRALCFM = ifelse(IRALCFM %in% c(91, 93), 0, IRALCFM),
+    IRMJFM = ifelse(IRMJFM %in% c(91, 93), 0, IRMJFM),
+    ALCYDAYS = as.factor(ALCYDAYS),
+    MRJYDAYS = as.factor(MRJYDAYS),
+    MRJMDAYS = as.factor(MRJMDAYS),
+    CIGMDAYS = as.factor(CIGMDAYS),
+    SMKLSMDAYS = as.factor(SMKLSMDAYS),
+    ALCMDAYS = as.factor(ALCMDAYS)
+  )
+summary(df_clean)
+```
+```{r}
+# Adding labels to MRJFLAG to make it visually easier to plot
+df_clean$MRJFLAG <- factor(df_clean$MRJFLAG, levels = c(0, 1),
+                           labels = c("Never Used", "Ever Used"))
+
+# Plot Distribution of Youth Marijuana Use
+ggplot(df_clean, aes(x = MRJFLAG)) +
+  geom_bar(fill = "purple") +
+  labs(title = "Distribution of Marijuana Use (MRJFLAG)",
+       x = "Marijuana Use",
+       y = "Responses") +
+  theme_minimal()
+```
+
+
+Binary classification (e.g. has or has not used marijuana (MRJFLAG)
+```{r}
+# Split data into test and training set.
+set.seed(1)
+train <- sample(1:nrow(df_clean), nrow(df_clean) / 2)
+df_clean.test <- df_clean[-train, ]
+df_clean.full <- df_clean[train,]
+
+
+#Standard Tree - Marijuana Ever Used ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic. 
+tree_model <- tree(MRJFLAG ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+PARCHKHW+
+                            PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                            YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                            PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+
+                            FRDMEVR2+FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+
+                            PRVDRGO2+GRPCNSL2+PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+
+                            RLGIMPT+RLGDCSN+RLGFRND+IRSEX+NEWRACE2+IMOTHER+IFATHER+INCOME+
+                            GOVTPROG+POVERTY3+PDEN10+COUTYP4, data = df_clean.full)
+
+# Plot Tree
+plot(tree_model)
+text(tree_model, pretty=0)
+
+# Print Tree Model Summary
+summary(tree_model)
+
+# Assess Model Prediction using Test data set. 
+pred <- predict(tree_model, newdata = df_clean.test, type = "class")
+table(pred, df_clean.test$MRJFLAG)
+cat("Accuracy of Tree model for MRJFLAG: ")
+mean(pred == df_clean.test$MRJFLAG)
+```
+
+```{r}
+set.seed(1)
+
+# Evaluate optimal tree level complexity
+cv.mrj <- cv.tree(tree_model, FUN = prune.misclass)
+
+# Plot number of terminal nodes and cost-complexity parameter against error rate
+plot(cv.mrj$size, cv.mrj$dev, type = "b",xlab = "Size", ylab = "Cross-validation Errors")
+plot(cv.mrj$k, cv.mrj$dev, type = "b",xlab = "Alpha", ylab = "Cross-validation Errors")
+
+
+# Prune tree to obtain four-node tree
+pruned_tree <- prune.misclass(tree_model, best = 4)
+plot(pruned_tree)
+text(pruned_tree, pretty = 0)
+
+# Assess Model Prediction using Test data set. 
+tree.pred <- predict(pruned_tree, df_clean.test,    type = "class")
+table(tree.pred, df_clean.test$MRJFLAG)
+cat("Accuracy of Pruned Tree model for MRJFLAG: ")
+mean(tree.pred == df_clean.test$MRJFLAG)
+```
+```{r}
+# Plot Strongest Indicator ALCFLAG using stacked bars and evaluate MRJFLAG within responses. 
+ggplot(df_clean, aes(x = ALCFLAG, fill = MRJFLAG)) +
+  geom_bar(position = "fill") +
+  labs(title = "Proportion of Marijuana Use (MRJFLAG) by Alcohol Use (ALCFLAG)",
+       x = "Alcohol Ever Used",
+       y = "Proportion",
+       fill = "Marijuana Use") +
+  theme_minimal()
+```
+
+
+```{r}
+#Bagging - Marijuana Ever Used ~ ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic. 
+mrj.bag <- randomForest(MRJFLAG ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+PARCHKHW+
+                            PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                            YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                            PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+
+                            FRDMEVR2+FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+
+                            PRVDRGO2+GRPCNSL2+PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+
+                            RLGIMPT+RLGDCSN+RLGFRND+IRSEX+NEWRACE2+IMOTHER+IFATHER+INCOME+
+                            GOVTPROG+POVERTY3+PDEN10+COUTYP4, data = df_clean.full, mtry = 59, importance = TRUE)
+
+# Plot Tree
+#plot(mrj.bag)
+
+# Print Baggings Model Summary
+print(mrj.bag)
+
+
+# Assess Model Prediction using Test data set.
+yhat.bag <- predict(mrj.bag, newdata = df_clean.test)
+table(yhat.bag, df_clean.test$MRJFLAG)
+cat("Accuracy of Baggings for MRJFLAG: ")
+mean(yhat.bag == df_clean.test$MRJFLAG)
+
+# Variable Importance
+importance(mrj.bag)
+varImpPlot(mrj.bag)
+
+# Plot Top 10 most important predictors
+imp_bg <- importance(mrj.bag)
+imp_df <- data.frame(var = rownames(imp_bg), importance = imp_bg[, "MeanDecreaseGini"])
+top10_bg <- imp_df %>% arrange(desc(importance)) %>% head(10)
+ggplot(top10_bg, aes(x = reorder(var, importance), y = importance)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 Predictors (Baggings)",
+       x = "Variable",
+       y = "Mean Decrease Gini") +
+  theme_minimal()
+
+```
+```{r}
+#Random Forest - Marijuana Ever Used ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic. 
+mrj.forest <- randomForest(MRJFLAG ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+PARCHKHW+
+                            PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                            YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                            PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+
+                            FRDMEVR2+FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+
+                            PRVDRGO2+GRPCNSL2+PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+
+                            RLGIMPT+RLGDCSN+RLGFRND+IRSEX+NEWRACE2+IMOTHER+IFATHER+INCOME+
+                            GOVTPROG+POVERTY3+PDEN10+COUTYP4, data = df_clean.full, mtry = 29, importance = TRUE)
+
+# Print Random Forest Model Summary
+print(mrj.forest)
+
+# Assess Model Prediction using Test data set.
+yhat.forest <- predict(mrj.forest, newdata = df_clean.test)
+table(yhat.forest, df_clean.test$MRJFLAG)
+cat("Accuracy of Random Forest for MRJFLAG: ")
+mean(yhat.forest == df_clean.test$MRJFLAG)
+
+# Variable Importance
+importance(mrj.forest)
+varImpPlot(mrj.forest)
+
+# Plot Top 10 most important predictors
+imp_fr <- importance(mrj.forest)
+imp_df <- data.frame(var = rownames(imp_fr), importance = imp_fr[, "MeanDecreaseGini"])
+top10_fr <- imp_df %>% arrange(desc(importance)) %>% head(10)
+ggplot(top10_fr, aes(x = reorder(var, importance), y = importance)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 Predictors (Random Forest)",
+       x = "Variable",
+       y = "Mean Decrease Gini") +
+  theme_minimal()
+```
+
+
+
+```{r}
+set.seed(1)
+
+# gbm function requires MRJFLAG variable to be numerical if we want to use bernoulli distribution
+df_clean$MRJFLAG_NUM <- ifelse(df_clean$MRJFLAG == "Ever Used", 1, 0)
+
+df_clean.test <- df_clean[-train, ]
+df_clean.full <- df_clean[train,]
+
+# Boosted Model - Marijuana Ever Used ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic. 
+mar.boost <- gbm(MRJFLAG_NUM ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+PARCHKHW+
+                            PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                            YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                            PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+
+                            FRDMEVR2+FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+
+                            PRVDRGO2+GRPCNSL2+PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+
+                            RLGIMPT+RLGDCSN+RLGFRND+IRSEX+NEWRACE2+IMOTHER+IFATHER+INCOME+
+                            GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "bernoulli", n.trees = 5000,
+                 interaction.depth = 4)
+
+
+summary(mar.boost)
+yhat.boost <- predict(mar.boost,newdata = df_clean.test, n.trees = 5000)
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- ifelse(yhat.boost > 0.5, 1, 0)
+cat("Accuracy of Boosting for MRJFLAG: ")
+mean(yhat.boost == df_clean.test$MRJFLAG_NUM)
+
+table(Predicted = yhat.boost, Actual = df_clean.test$MRJFLAG)
+accuracy_boost <- mean(yhat.boost == df_clean.test$MRJFLAG_NUM)
+error_boost <- 1 - accuracy_boost
+cat("Boosting Classification Error:", error_boost)
+
+# Plot Top 10 most important predictors
+boost_model <- summary(mar.boost, plotit = FALSE)
+top10 <- head(boost_model, 10)
+
+ggplot(top10, aes(x = reorder(var, rel.inf), y = rel.inf)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 Predictors in Boosting Model",
+       x = "Variable",
+       y = "Relative Influence (%)") +
+  theme_minimal()
+
+```
+
+
+Multi-class classification (e.g. differentiate between seldom, sometimes, and frequent alcohol use)
+
+```{r}
+# Generate multi-class classification for Alcohol Use in the past year
+df_clean$ALCYDAYS_CLASS <- case_when(
+  df_clean$ALCYDAYS %in% c("6") ~ "Never",
+  df_clean$ALCYDAYS %in% c("1", "2") ~ "Seldom",
+  df_clean$ALCYDAYS %in% c("3", "4", "5") ~ "Frequent"
+)
+
+df_clean$ALCYDAYS_CLASS <- factor(df_clean$ALCYDAYS_CLASS, levels = c("Never", "Seldom", "Frequent"))
+```
+
+```{r}
+
+# Plot Distribution of Multi-class Alcohol Use
+ggplot(df_clean, aes(x = ALCYDAYS_CLASS)) +
+  geom_bar(fill = "purple") +
+  labs(title = "Distribution of Alcohol Use (ALCYDAYS_CLASS)",
+       x = "Alcohol Use",
+       y = "Responses") +
+  theme_minimal()
+```
+
+
+```{r}
+set.seed(1)
+
+# Split data into test and training set.
+train <- sample(1:nrow(df_clean), nrow(df_clean) / 2)
+df_clean.test <- df_clean[-train, ]
+df_clean.full <- df_clean[train,]
+
+```
+
+```{r}
+#Bagging - Alcohol USE~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic. 
+alc.bag <- randomForest(ALCYDAYS_CLASS ~ ALCFLAG+MRJFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+PARCHKHW+
+                            PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                            YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                            PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+
+                            FRDMEVR2+FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+
+                            PRVDRGO2+GRPCNSL2+PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+
+                            RLGIMPT+RLGDCSN+RLGFRND+IRSEX+NEWRACE2+IMOTHER+IFATHER+INCOME+
+                            GOVTPROG+POVERTY3+PDEN10+COUTYP4, data = df_clean.full, mtry = 59, importance = TRUE)
+
+# Plot Tree
+#plot(mrj.bag)
+
+# Print Baggings Model Summary
+print(alc.bag)
+
+
+# Assess Model Prediction using Test data set.
+yhat.bag <- predict(alc.bag, newdata = df_clean.test)
+table(yhat.bag, df_clean.test$ALCYDAYS_CLASS)
+cat("Accuracy of Baggings for ALCYDAYS_CLASS: ")
+mean(yhat.bag == df_clean.test$ALCYDAYS_CLASS)
+
+
+# Variable Importance
+importance(alc.bag)
+varImpPlot(alc.bag)
+
+# Plot Top 10 most important predictors
+imp_bag <- importance(alc.bag)
+imp_df <- data.frame(var = rownames(imp_bag), importance = imp_bag[, "MeanDecreaseGini"])
+top10_bg <- imp_df %>% arrange(desc(importance)) %>% head(10)
+ggplot(top10_bg, aes(x = reorder(var, importance), y = importance)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 Predictors (Baggings)",
+       x = "Variable",
+       y = "Mean Decrease Gini") +
+  theme_minimal()
+
+
+```
+```{r}
+#Random Forest - Alcohol USE ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic. 
+alc.forest <- randomForest(ALCYDAYS_CLASS ~ ALCFLAG+MRJFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+PARCHKHW+
+                            PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                            YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                            PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+
+                            FRDMEVR2+FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+
+                            PRVDRGO2+GRPCNSL2+PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+
+                            RLGIMPT+RLGDCSN+RLGFRND+IRSEX+NEWRACE2+IMOTHER+IFATHER+INCOME+
+                            GOVTPROG+POVERTY3+PDEN10+COUTYP4, data = df_clean.full, mtry = 29, importance = TRUE)
+
+# Print Random Forest Model Summary
+print(alc.forest)
+
+# Assess Model Prediction using Test data set.
+yhat.forest <- predict(alc.forest, newdata = df_clean.test, type='class')
+table(yhat.forest, df_clean.test$ALCYDAYS_CLASS)
+cat("Accuracy of Random Forest for ALCYDAYS_CLASS: ")
+mean(yhat.forest == df_clean.test$ALCYDAYS_CLASS)
+
+# Variable Importance
+importance(alc.forest)
+varImpPlot(alc.forest)
+
+# Plot Top 10 most important predictors
+imp_fr <- importance(alc.forest)
+imp_df <- data.frame(var = rownames(imp_fr), importance = imp_fr[, "MeanDecreaseGini"])
+top10_rf <- imp_df %>% arrange(desc(importance)) %>% head(10)
+ggplot(top10_rf, aes(x = reorder(var, importance), y = importance)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 Predictors (Random Forest)",
+       x = "Variable",
+       y = "Mean Decrease Gini") +
+  theme_minimal()
+```
+
+Regression (e.g. number of days per year a person has used Marijuana)
+
+```{r}
+# Plot Distribution of Youth Marijuana Number of days per year use
+ggplot(df_clean, aes(x = IRMJFY)) +
+  geom_histogram(fill = "purple", bins = 30) +
+  labs(title = "Distribution of Marijuana Use Frequency (IRMJFY)",
+       x = "Number of Days Used",
+       y = "Number of Responses") +
+  theme_minimal()
+```
+
+
+```{r}
+
+#Tree Model- Marijuana Use (Range 0-365) ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic. 
+tree_mrj_freq <- tree(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4,
+                      data = df_clean.full)
+
+plot(tree_mrj_freq)
+text(tree_mrj_freq, pretty=0)
+
+# Print Tree Model Summary
+summary(tree_mrj_freq)
+
+# Assess Model Prediction using Test data set. 
+pred_tree <- predict(tree_mrj_freq, newdata = df_clean.test)
+cat("MSE for regression tree using IRMJFY:")
+mean((pred_tree - df_clean.test$IRMJFY)^2)
+```
+```{r}
+set.seed(1)
+
+# Evaluate optimal tree level complexity
+cv.mrj_freq <- cv.tree(tree_mrj_freq)
+
+# Plot number of terminal nodes and cost-complexity parameter against error rate
+plot(cv.mrj_freq$size, cv.mrj_freq$dev, type = "b",xlab = "Size", ylab = "Cross-validation Errors")
+plot(cv.mrj_freq$k, cv.mrj_freq$dev, type = "b",xlab = "Alpha", ylab = "Cross-validation Errors")
+
+
+# Prune tree to obtain seven-node tree
+pruned_mjtree <- prune.tree(tree_mrj_freq, best = 7)
+plot(pruned_mjtree)
+text(pruned_mjtree, pretty = 0)
+
+# Assess Model Prediction using Test data set. 
+tree.mjpred <- predict(pruned_mjtree, df_clean.test)
+cat("MSE of Pruned Tree model for IRMJFY: ")
+mean((tree.mjpred - df_clean.test$IRMJFY)^2)
+
+
+```
+```{r}
+#Baggings Model- Marijuana Use (Range 0-365) ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic.
+mj.bag <- randomForest(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4,
+                      data = df_clean.full,
+                      mtry = 58, importance = TRUE, ntree=100)
+
+# Print Baggings Model Summary
+print(mj.bag)
+
+
+# Assess Model Prediction using Test data set.
+yhat.bag <- predict(mj.bag, newdata = df_clean.test)
+cat("MSE of Baggings for IRMJFY: ")
+mean((yhat.bag - df_clean.test$IRMJFY)^2)
+plot(yhat.bag, df_clean.test$IRMJFY, main= "Baggings")
+abline(0, 1)
+
+# Variable Importance
+importance(mj.bag)
+varImpPlot(mj.bag)
+
+# Plot Top 10 most important predictos
+imp_bg <- importance(mj.bag)
+imp_df <- data.frame(var = rownames(imp_bg), importance = imp_bg[, "IncNodePurity"])
+top10_bg <- imp_df %>% arrange(desc(importance)) %>% head(10)
+ggplot(top10_bg, aes(x = reorder(var, importance), y = importance)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 Predictors (Baggings)",
+       x = "Variable",
+       y = "Node Purity") +
+  theme_minimal()
+
+
+# Plot of Error vs Number of Trees. This is to show that I have used enough trees.
+plot(mj.bag$mse)
+
+
+```
+## (Updated) Optimizing mtry paramter for Random Forest
+
+```{r}
+set.seed(1)
+#Random Forest Model- Marijuana Use (Range 0-365) ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic.
+mj.forest_m1 <- randomForest(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4,
+                      data = df_clean.full,
+                      mtry = 1, importance = TRUE, ntree=100)
+
+
+
+#Random Forest Model- Marijuana Use (Range 0-365) ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic.
+mj.forest_m8 <- randomForest(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4,
+                      data = df_clean.full,
+                      mtry = 8, importance = TRUE, ntree=100)
+
+
+
+#Random Forest Model- Marijuana Use (Range 0-365) ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic.
+mj.forest_m26 <- randomForest(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4,
+                      data = df_clean.full,
+                      mtry = 26, importance = TRUE, ntree=100)
+
+
+
+#Random Forest Model- Marijuana Use (Range 0-365) ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic.
+mj.forest_m58 <- randomForest(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4,
+                      data = df_clean.full,
+                      mtry = 58, importance = TRUE, ntree=100)
+
+
+# Assess Model Prediction using Test data set.
+yhat.forest_m1 <- predict(mj.forest_m1, newdata = df_clean.test)
+cat("MSE of Random Forest for IRMJFY with mtry=1: ")
+mean((yhat.forest_m1 - df_clean.test$IRMJFY)^2)
+
+yhat.forest_m8 <- predict(mj.forest_m8, newdata = df_clean.test)
+cat("MSE of Random Forest for IRMJFY with mtry=8: ")
+mean((yhat.forest_m8 - df_clean.test$IRMJFY)^2)
+
+yhat.forest_m26 <- predict(mj.forest_m26, newdata = df_clean.test)
+cat("MSE of Random Forest for IRMJFY with mtry=26: ")
+mean((yhat.forest_m26 - df_clean.test$IRMJFY)^2)
+
+yhat.forest_m58 <- predict(mj.forest_m58, newdata = df_clean.test)
+cat("MSE of Random Forest for IRMJFY with mtry=58: ")
+mean((yhat.forest_m58 - df_clean.test$IRMJFY)^2)
+```
+
+## (Updated) Optimizing RF with mtry = 8
+
+
+```{r}
+set.seed(1)
+#Random Forest Model- Marijuana Use (Range 0-365) ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic.
+mj.forest <- randomForest(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4,
+                      data = df_clean.full,
+                      mtry = 8, importance = TRUE, ntree=100)
+
+# Print Random Forest Model Summary
+print(mj.forest)
+
+
+# Assess Model Prediction using Test data set.
+yhat.forest <- predict(mj.forest, newdata = df_clean.test)
+cat("MSE of Random Forest for IRMJFY: ")
+mean((yhat.forest - df_clean.test$IRMJFY)^2)
+plot(yhat.forest, df_clean.test$IRMJFY, main= "Random Forest")
+abline(0, 1)
+
+# Variable Importance
+importance(mj.forest)
+varImpPlot(mj.forest)
+
+# Plot of Error vs Number of Trees. This is to show that I have used enough trees.
+plot(mj.forest$mse)
+
+imp_rf <- importance(mj.forest)
+imp_df <- data.frame(var = rownames(imp_rf), importance = imp_rf[, "IncNodePurity"])
+
+top10_rf <- imp_df %>% arrange(desc(importance)) %>% head(10)
+
+ggplot(top10_rf, aes(x = reorder(var, importance), y = importance)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 Predictors (Random Forest)",
+       x = "Variable",
+       y = "Node Purity") +
+  theme_minimal()
+```
+
+
+## (Updated) Optimizing the number of trees to use for Boosting
+
+```{r}
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_nt <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 10000,
+                 interaction.depth = 4)
+
+# Best Number of Trees to Use
+best.iter <- gbm.perf(mj.boost_nt, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_nt,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with n Trees Optimized: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+
+
+
+```
+
+
+## (Updated) Now that I know that the optimal number of trees is ~141 I will optimize the Shrinkage Rate for Boosting. I will continue using an extra number of trees and optimizing the right number for each shrinkage tested. 
+
+
+```{r}
+set.seed(1)
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_s1 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 200, shrinkage = 0.1,
+                 interaction.depth = 4)
+
+
+best.iter <- gbm.perf(mj.boost_s1, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_s1,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Shrinkage 0.1: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_s05 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 200, shrinkage = 0.05,
+                 interaction.depth = 4)
+
+
+best.iter <- gbm.perf(mj.boost_s05, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_s05,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Shrinkage 0.05: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_s02 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 200, shrinkage = 0.02,
+                 interaction.depth = 4)
+
+
+best.iter <- gbm.perf(mj.boost_s02, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_s02,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Shrinkage 0.02: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+
+
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_s01 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 400, shrinkage = 0.01,
+                 interaction.depth = 4)
+
+
+best.iter <- gbm.perf(mj.boost_s01, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_s01,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Shrinkage 0.01: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+mj.boost_s001 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 600, shrinkage = 0.001,
+                 interaction.depth = 4)
+
+
+best.iter <- gbm.perf(mj.boost_s001, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_s001,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Shrinkage 0.001: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+
+mj.boost_s0001 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 600, shrinkage = 0.0001,
+                 interaction.depth = 4)
+
+
+best.iter <- gbm.perf(mj.boost_s0001, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_s0001,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Shrinkage 0.0001: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+```
+## (Updated) Optimizing Interaction Depth
+
+```{r}
+set.seed(1)
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_iter1 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 100, shrinkage = 0.05,
+                 interaction.depth = 1)
+
+
+best.iter <- gbm.perf(mj.boost_iter1, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_iter1,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Interaction Depth 1: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_iter2 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 100, shrinkage = 0.05,
+                 interaction.depth = 2)
+
+
+best.iter <- gbm.perf(mj.boost_iter2, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_iter2,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Interaction Depth 2: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_iter3 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 100, shrinkage = 0.05,
+                 interaction.depth = 3)
+
+
+best.iter <- gbm.perf(mj.boost_iter3, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_iter3,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Interaction Depth 3: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_iter4 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 100, shrinkage = 0.05,
+                 interaction.depth = 4)
+
+
+best.iter <- gbm.perf(mj.boost_iter4, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_iter4,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Interaction Depth 4: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_iter5 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 100, shrinkage = 0.05,
+                 interaction.depth = 5)
+
+
+best.iter <- gbm.perf(mj.boost_iter5, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_iter5,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Interaction Depth 5: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+
+# Assess Boosting with Different Shrinkage Rates
+mj.boost_iter6 <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 100, shrinkage = 0.05,
+                 interaction.depth = 6)
+
+
+best.iter <- gbm.perf(mj.boost_iter6, method = "OOB")
+cat("Best Number of Trees: \n")
+best.iter
+
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost_iter6,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY with Interaction Depth 6: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+
+
+```
+
+## (Updated) Final Boosting model For Marijuana Use with Optimized Parameters
+
+```{r}
+set.seed(1)
+# Boosted Model - Marijuana Use (Range 0-365) ~ Drug Use + Recorded Youth Experiences + Demographics + Household Composition + Recorded Income + Geographic.
+mj.boost <- gbm(IRMJFY ~ ALCFLAG+TOBFLAG+SCHFELT+TCHGJOB+AVGGRADE+STNDSCIG+STNDSMJ+STNDALC+STNDDNK+
+                        PARCHKHW+PARHLPHW+PRCHORE2+PRLMTTV2+PARLMTSN+PRGDJOB2+PRPROUD2+ARGUPAR+
+                        YOFIGHT2+YOGRPFT2+YOHGUN2+YOSELL2+YOSTOLE2+YOATTAK2+PRPKCIG2+PRMJEVR2+
+                        PRMJMO+PRALDLY2+YFLPKCG2+YFLTMRJ2+YFLMJMO+YFLADLY2+FRDPCIG2+FRDMEVR2+
+                        FRDMJMON+FRDADLY2+TALKPROB+PRTALK3+PRBSOLV2+PREVIOL2+PRVDRGO2+GRPCNSL2+
+                        PREGPGM2+YTHACT2+DRPRVME3+ANYEDUC3+RLGATTD+RLGIMPT+RLGDCSN+RLGFRND+IRSEX+
+                        NEWRACE2+IMOTHER+IFATHER+INCOME+GOVTPROG+POVERTY3+PDEN10+COUTYP4, 
+                 data = df_clean.full,
+                 distribution = "gaussian", n.trees = 100, shrinkage = 0.05,
+                 interaction.depth = 3)
+
+# Print Boosting Model Summary
+summary(mj.boost)
+best.iter <- gbm.perf(mj.boost, method = "OOB")
+best.iter
+
+# Assess Model Prediction using Test data set.
+yhat.boost <- predict(mj.boost,newdata = df_clean.test, n.trees = best.iter)
+cat("MSE of Boosting for IRMJFY: ")
+mean((yhat.boost - df_clean.test$IRMJFY)^2)
+plot(yhat.boost, df_clean.test$IRMJFY, main= "Boosting")
+abline(0, 1)
+
+# Plot Top 10 most important predictors
+boost_model <- summary(mj.boost, plotit = FALSE)
+top10 <- head(boost_model, 10)
+
+ggplot(top10, aes(x = reorder(var, rel.inf), y = rel.inf)) +
+  geom_col(fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 Predictors in Boosting Model",
+       x = "Variable",
+       y = "Relative Influence (%)") +
+  theme_minimal()
+```
