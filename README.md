@@ -7,7 +7,7 @@ This repository contains the code, outputs, and presentation materials for the r
 
   Note: Section of code that was updated is labeled in the notebook. Updates include optimization of parameters for Random Forest
   and Boosting methods used for Regression model.
-- 202500423_YouthData_Updated.pdf (Updated: Final presentation slide deck. Slides that were modified say (Updated) as part of the slide title.
+- 202500423_YouthData_Updated.pdf: Final presentation slide deck. Slides that were modified say (Updated) as part of the slide title.
 
   Note: Slides now include a theoretical background slide. Variables in the plots used were renamed to be plain lenguate to ease
   understanding. Model result number were updated in all slides. Additionally, wording on slides was updated for consistency throughout
